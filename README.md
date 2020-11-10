@@ -1,5 +1,5 @@
 ## Transformers with Model Parallelism for GPT2 and T5
-This is a fork on the main transformers library that enables you to distrubte the attention blocks of large models like gpt2-xl and t5-3b and t5-11b across several devices, thus enabling you to fine-tune large transformers. Until the HuggingFace team is able to merge my changes into the main library, I'll keep this library up. In general,  large transformers perform much better than their smaller cousins and train faster. Model parallelism is controlled by two methods on the model like this:
+This is a fork on the main transformers library that enables you to distribute the attention blocks of very large models like `gpt2-xl`,  `t5-3b` and `t5-11b` across several devices, thus enabling you to fine-tune large transformers. Until the HuggingFace team is able to merge my changes into the main library, I'll keep this library up. In general,  large transformers perform much better than their smaller cousins and train faster. Model parallelism is controlled by two methods on the model like this:
 ```
 from transformers import GPT2LMHead
 model = GPT2LMHead('gpt2-xl')
