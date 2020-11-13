@@ -124,6 +124,7 @@ class GenerationMixin:
         bos_token_id: Optional[int] = None,
         pad_token_id: Optional[int] = None,
         eos_token_id: Optional[int] = None,
+        new_token_type_id: Optional[int] = None,
         length_penalty: Optional[float] = None,
         no_repeat_ngram_size: Optional[int] = None,
         num_return_sequences: Optional[int] = None,
@@ -247,7 +248,6 @@ class GenerationMixin:
             input_ids = tokenizer.encode(input_context, return_tensors='pt')  # encode input context
             outputs = model.generate(input_ids=input_ids, max_length=100, do_sample=True, bad_words_ids=bad_words_ids)  # generate sequences without allowing bad_words to be generated
         """
-
         # We cannot generate if the model does not have a LM head
         if self.get_output_embeddings() is None:
             raise AttributeError(
@@ -473,6 +473,7 @@ class GenerationMixin:
                 bad_words_ids=bad_words_ids,
                 pad_token_id=pad_token_id,
                 eos_token_id=eos_token_id,
+                new_token_type_id=new_token_type_id,
                 batch_size=effective_batch_size,
                 num_return_sequences=num_return_sequences,
                 length_penalty=length_penalty,
@@ -497,6 +498,7 @@ class GenerationMixin:
                 bad_words_ids=bad_words_ids,
                 pad_token_id=pad_token_id,
                 eos_token_id=eos_token_id,
+                new_token_type_id=new_token_type_id,
                 batch_size=effective_batch_size,
                 attention_mask=attention_mask,
                 use_cache=use_cache,
@@ -520,6 +522,7 @@ class GenerationMixin:
         bad_words_ids,
         pad_token_id,
         eos_token_id,
+        new_token_type_id,
         batch_size,
         attention_mask,
         use_cache,
@@ -537,8 +540,11 @@ class GenerationMixin:
             model_inputs = self.prepare_inputs_for_generation(
                 input_ids, past=past, attention_mask=attention_mask, use_cache=use_cache, **model_kwargs
             )
+            if 'token_type_ids' in model_kwargs:
+                self.assert_token_types(new_token_type_id, use_cache)
+                model_kwargs = self.generate_token_type_ids(model_inputs, model_kwargs, new_token_type_id)
 
-            outputs = self(**model_inputs, return_dict=True)
+            outputs = self(**model_inputs, return_dict=True, **model_kwargs)
             next_token_logits = outputs.logits[:, -1, :]
 
             scores = self.postprocess_next_token_scores(
@@ -621,6 +627,7 @@ class GenerationMixin:
         bad_words_ids,
         pad_token_id,
         eos_token_id,
+        new_token_type_id,
         batch_size,
         num_return_sequences,
         length_penalty,
@@ -656,6 +663,10 @@ class GenerationMixin:
             model_inputs = self.prepare_inputs_for_generation(
                 input_ids, past=past, attention_mask=attention_mask, use_cache=use_cache, **model_kwargs
             )
+            if 'token_type_ids' in model_kwargs:
+                self.assert_token_types(new_token_type_id, use_cache)
+                model_kwargs = self.generate_token_type_ids(model_inputs, model_kwargs, new_token_type_id)
+
             outputs = self(**model_inputs, return_dict=True)  # (batch_size * num_beams, cur_len, vocab_size)
             next_token_logits = outputs.logits[:, -1, :]  # (batch_size * num_beams, vocab_size)
 
@@ -863,6 +874,26 @@ class GenerationMixin:
                 decoded[i, sent_lengths[i]] = eos_token_id
 
         return decoded
+
+    def assert_token_types(self, new_token_type_id, use_cache):
+        assert new_token_type_id, ("No new_token_type_id provided. If you use token_type_ids with "
+            "model.generate, you must specify a new token to use for generated tokens.")
+        assert not use_cache, ("Utilizing token_type_ids with use_cache is not currently supported. "
+            "Please set use_cache to False.")
+
+    def generate_token_type_ids(self, model_inputs, model_kwargs, new_token_type_id):
+        token_type_ids_len = model_kwargs['token_type_ids'].shape[1]
+        if model_inputs['past_key_values']:
+            new_token_id = torch.tensor([[new_token_type_id]], device = model_inputs['past_key_values'][0].device)
+            input_len = model_inputs['past_key_values'][0].shape[3]
+            if token_type_ids_len <=  input_len:
+                model_kwargs['token_type_ids'] = torch.cat((model_kwargs['token_type_ids'], new_token_id), dim = 1)
+        else:
+            new_token_id = torch.tensor([[new_token_type_id]], device = model_kwargs['token_type_ids'].device)
+            input_len = model_inputs['input_ids'].shape[1]
+            if token_type_ids_len < input_len:
+                model_kwargs['token_type_ids'] = torch.cat((model_kwargs['token_type_ids'], new_token_id), dim = 1)
+        return model_kwargs
 
     @staticmethod
     def _reorder_cache(past: Tuple, beam_idx: Tensor) -> Tuple[Tensor]:
